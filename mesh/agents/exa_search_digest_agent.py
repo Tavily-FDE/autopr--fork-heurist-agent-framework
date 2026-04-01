@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 _tavily_client = None
 _tavily_api_key = os.getenv("TAVILY_API_KEY")
 if _tavily_api_key:
-    from tavily import TavilyClient
+    from tavily import AsyncTavilyClient
 
-    _tavily_client = TavilyClient(api_key=_tavily_api_key)
+    _tavily_client = AsyncTavilyClient(api_key=_tavily_api_key)
     logger.info("Tavily fallback client initialized for ExaSearchDigestAgent")
 
 NON_ROTATABLE_ERRORS = ["500", "404", "422", "not found", "unprocessable"]
@@ -372,7 +372,7 @@ class ExaSearchDigestAgent(MeshAgent):
         kwargs = {"query": search_term, "max_results": limit, "search_depth": "advanced"}
         if include_domains:
             kwargs["include_domains"] = include_domains
-        tavily_response = _tavily_client.search(**kwargs)
+        tavily_response = await _tavily_client.search(**kwargs)
         formatted_results = []
         for r in tavily_response.get("results", []):
             formatted_results.append(
@@ -395,7 +395,7 @@ class ExaSearchDigestAgent(MeshAgent):
         if not _tavily_client:
             return None
         logger.info(f"Attempting Tavily fallback extract for {urls}")
-        tavily_response = _tavily_client.extract(urls=urls[:5])
+        tavily_response = await _tavily_client.extract(urls=urls[:5])
         all_content = []
         for r in tavily_response.get("results", []):
             raw_content = r.get("raw_content", "") or r.get("text", "")
