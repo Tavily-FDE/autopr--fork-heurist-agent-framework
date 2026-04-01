@@ -10,7 +10,7 @@ from firecrawl.firecrawl import ScrapeOptions
 
 from decorators import with_cache, with_retry
 from mesh.agents.exa_search_agent import build_firecrawl_to_exa_fallback
-from mesh.agents.tavily_search_agent import build_firecrawl_to_tavily_fallback
+from mesh.agents.tavily_fallback import build_firecrawl_to_tavily_fallback
 from mesh.firecrawl_logger import FirecrawlLogger
 from mesh.gemini import call_gemini_async
 from mesh.mesh_agent import MeshAgent
