@@ -8,6 +8,14 @@ from mesh.mesh_agent import MeshAgent
 
 logger = logging.getLogger(__name__)
 
+_tavily_client = None
+_tavily_api_key = os.getenv("TAVILY_API_KEY")
+if _tavily_api_key:
+    from tavily import TavilyClient
+
+    _tavily_client = TavilyClient(api_key=_tavily_api_key)
+    logger.info("Tavily fallback client initialized for ExaSearchAgent")
+
 NON_ROTATABLE_ERRORS = ["500", "404", "422", "not found", "unprocessable"]
 
 
@@ -254,6 +262,39 @@ class ExaSearchAgent(MeshAgent):
     # ------------------------------------------------------------------------
     #                      EXA API-SPECIFIC METHODS
     # ------------------------------------------------------------------------
+    def _tavily_search_fallback(self, search_term: str, limit: int = 10, include_domains: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
+        if not _tavily_client:
+            return None
+        logger.info(f"Attempting Tavily fallback search for '{search_term}'")
+        kwargs = {"query": search_term, "max_results": limit, "search_depth": "advanced"}
+        if include_domains:
+            kwargs["include_domains"] = include_domains
+        tavily_response = _tavily_client.search(**kwargs)
+        formatted_results = []
+        for r in tavily_response.get("results", []):
+            formatted_results.append(
+                {
+                    "title": r.get("title", "N/A"),
+                    "url": r.get("url", "N/A"),
+                    "published_date": "N/A",
+                    "text": r.get("content", ""),
+                }
+            )
+        logger.info(f"Tavily fallback returned {len(formatted_results)} results")
+        return {"status": "success", "provider": "tavily", "data": {"search_results": formatted_results}}
+
+    def _tavily_answer_fallback(self, question: str) -> Optional[Dict[str, Any]]:
+        if not _tavily_client:
+            return None
+        logger.info(f"Attempting Tavily fallback answer for '{question}'")
+        tavily_response = _tavily_client.search(query=question, max_results=5, search_depth="advanced", include_answer=True)
+        answer = tavily_response.get("answer", "No direct answer available")
+        sources = [
+            {"title": r.get("title", "N/A"), "url": r.get("url", "N/A")} for r in tavily_response.get("results", [])
+        ]
+        logger.info("Tavily fallback answer retrieved")
+        return {"status": "success", "provider": "tavily", "data": {"answer": answer, "sources": sources}}
+
     @with_cache(ttl_seconds=3600)  # Cache for 1 hour
     @with_retry(max_retries=3)
     async def exa_web_search(
@@ -292,6 +333,9 @@ class ExaSearchAgent(MeshAgent):
 
             if "error" in response:
                 logger.error(f"Exa search API error: {response['error']}")
+                fallback = self._tavily_search_fallback(search_term, limit, include_domains)
+                if fallback:
+                    return fallback
                 return {"status": "error", "error": response["error"]}
 
             # Format the search results data
@@ -311,6 +355,9 @@ class ExaSearchAgent(MeshAgent):
 
         except Exception as e:
             logger.error(f"Exception in exa_web_search: {str(e)}")
+            fallback = self._tavily_search_fallback(search_term, limit, include_domains)
+            if fallback:
+                return fallback
             return {"status": "error", "error": f"Failed to execute search: {str(e)}"}
 
     @with_cache(ttl_seconds=3600)  # Cache for 1 hour
@@ -329,6 +376,9 @@ class ExaSearchAgent(MeshAgent):
 
             if "error" in response:
                 logger.error(f"Exa answer API error: {response['error']}")
+                fallback = self._tavily_answer_fallback(question)
+                if fallback:
+                    return fallback
                 return {"status": "error", "error": response["error"]}
 
             # Format the answer result
@@ -345,6 +395,9 @@ class ExaSearchAgent(MeshAgent):
 
         except Exception as e:
             logger.error(f"Exception in exa_answer_question: {str(e)}")
+            fallback = self._tavily_answer_fallback(question)
+            if fallback:
+                return fallback
             return {"status": "error", "error": f"Failed to get answer: {str(e)}"}
 
     # ------------------------------------------------------------------------

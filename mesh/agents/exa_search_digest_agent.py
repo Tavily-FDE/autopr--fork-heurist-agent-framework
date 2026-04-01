@@ -13,6 +13,14 @@ from mesh.mesh_agent import MeshAgent
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+_tavily_client = None
+_tavily_api_key = os.getenv("TAVILY_API_KEY")
+if _tavily_api_key:
+    from tavily import TavilyClient
+
+    _tavily_client = TavilyClient(api_key=_tavily_api_key)
+    logger.info("Tavily fallback client initialized for ExaSearchDigestAgent")
+
 NON_ROTATABLE_ERRORS = ["500", "404", "422", "not found", "unprocessable"]
 
 SEARCH_TEXT_MAX_CHARS = 25000
@@ -355,6 +363,53 @@ class ExaSearchDigestAgent(MeshAgent):
             logger.error(f"LLM processing failed after {processing_time:.2f}s: {str(e)}")
             return f"Content from {url}:\n\n{scraped_content[:1000]}..."
 
+    async def _tavily_search_fallback(
+        self, search_term: str, limit: int = 10, include_domains: Optional[List[str]] = None, disambiguation: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        if not _tavily_client:
+            return None
+        logger.info(f"Attempting Tavily fallback search for '{search_term}'")
+        kwargs = {"query": search_term, "max_results": limit, "search_depth": "advanced"}
+        if include_domains:
+            kwargs["include_domains"] = include_domains
+        tavily_response = _tavily_client.search(**kwargs)
+        formatted_results = []
+        for r in tavily_response.get("results", []):
+            formatted_results.append(
+                {
+                    "title": r.get("title", "N/A"),
+                    "url": r.get("url", "N/A"),
+                    "published_date": "N/A",
+                    "text": r.get("content", ""),
+                }
+            )
+        if not formatted_results:
+            return None
+        logger.info(f"Tavily fallback returned {len(formatted_results)} results")
+        processed_summary = await self._process_search_results_with_llm(formatted_results, search_term, disambiguation)
+        return {"status": "success", "provider": "tavily", "data": {"processed_summary": processed_summary}}
+
+    async def _tavily_extract_fallback(
+        self, urls: List[str], extract_prompt: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        if not _tavily_client:
+            return None
+        logger.info(f"Attempting Tavily fallback extract for {urls}")
+        tavily_response = _tavily_client.extract(urls=urls[:5])
+        all_content = []
+        for r in tavily_response.get("results", []):
+            raw_content = r.get("raw_content", "") or r.get("text", "")
+            if raw_content:
+                all_content.append({"url": r.get("url", "unknown"), "text": raw_content})
+        if not all_content:
+            return None
+        logger.info(f"Tavily fallback extracted content from {len(all_content)} URL(s)")
+        combined_content = "\n\n---\n\n".join(f"URL: {item['url']}\n\n{item['text']}" for item in all_content)
+        processed_summary = await self._process_scraped_content_with_llm(
+            combined_content, ", ".join(urls), extract_prompt
+        )
+        return {"status": "success", "provider": "tavily", "data": {"processed_summary": processed_summary}}
+
     @with_cache(ttl_seconds=300)
     @with_retry(max_retries=3)
     async def exa_web_search(
@@ -399,6 +454,9 @@ class ExaSearchDigestAgent(MeshAgent):
 
             if "error" in response:
                 logger.error(f"Exa search API error: {response['error']}")
+                fallback = await self._tavily_search_fallback(search_term, limit, include_domains, disambiguation)
+                if fallback:
+                    return fallback
                 return {"status": "error", "error": response["error"]}
 
             results = response.get("results", [])
@@ -433,6 +491,9 @@ class ExaSearchDigestAgent(MeshAgent):
 
         except Exception as e:
             logger.error(f"Exception in exa_web_search: {str(e)}")
+            fallback = await self._tavily_search_fallback(search_term, limit, include_domains, disambiguation)
+            if fallback:
+                return fallback
             return {"status": "error", "error": f"Failed to execute search: {str(e)}"}
 
     @with_cache(ttl_seconds=300)
@@ -449,6 +510,9 @@ class ExaSearchDigestAgent(MeshAgent):
 
             if "error" in response:
                 logger.error(f"Exa contents API error: {response['error']}")
+                fallback = await self._tavily_extract_fallback(urls, extract_prompt)
+                if fallback:
+                    return fallback
                 return {"status": "error", "error": response["error"]}
 
             results = response.get("results", [])
@@ -491,6 +555,9 @@ class ExaSearchDigestAgent(MeshAgent):
 
         except Exception as e:
             logger.error(f"Exception in exa_scrape_url: {str(e)}")
+            fallback = await self._tavily_extract_fallback(urls, extract_prompt)
+            if fallback:
+                return fallback
             return {"status": "error", "error": f"Failed to scrape URL: {str(e)}"}
 
     async def _handle_tool_logic(
