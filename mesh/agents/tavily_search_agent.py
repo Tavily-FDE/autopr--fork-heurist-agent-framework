@@ -58,7 +58,7 @@ class TavilySearchAgent(MeshAgent):
                 "type": "function",
                 "function": {
                     "name": "tavily_web_search",
-                    "description": "Search the web using Tavily's AI-optimized search engine. Returns relevant results with titles, snippets, and URLs. Supports domain filtering and topic selection.",
+                    "description": "Search the web using Tavily's AI-optimized search engine. Returns relevant results with titles, snippets, and URLs.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -133,9 +133,9 @@ class TavilySearchAgent(MeshAgent):
         return result
 
 
-# ---------------------
-# Shared fallback helpers (used to fallback to Tavily search when Firecrawl tools fail)
-# ---------------------
+# ---------------------------------------------------------------------------
+# Shared fallback helpers (used to fall back to Tavily search when Firecrawl tools fail)
+# ---------------------------------------------------------------------------
 def build_tavily_search_fallback(search_term: str, limit: int = 10) -> Dict[str, Any]:
     """Build a fallback spec targeting Tavily web search."""
     return {
