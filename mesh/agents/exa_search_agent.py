@@ -357,7 +357,7 @@ class ExaSearchAgent(MeshAgent):
 
         except Exception as e:
             logger.error(f"Exception in exa_web_search: {str(e)}")
-            fallback = self._tavily_search_fallback(search_term, limit, include_domains)
+            fallback = await self._tavily_search_fallback(search_term, limit, include_domains)
             if fallback:
                 return fallback
             return {"status": "error", "error": f"Failed to execute search: {str(e)}"}
@@ -397,7 +397,7 @@ class ExaSearchAgent(MeshAgent):
 
         except Exception as e:
             logger.error(f"Exception in exa_answer_question: {str(e)}")
-            fallback = self._tavily_answer_fallback(question)
+            fallback = await self._tavily_answer_fallback(question)
             if fallback:
                 return fallback
             return {"status": "error", "error": f"Failed to get answer: {str(e)}"}
